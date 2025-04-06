@@ -39,3 +39,42 @@ with app.app_context():
 @app.route('/')
 def hello_world():
     return 'Scheduler API is running!'
+
+# Create new user
+@app.route('/create_user', methods=['POST'])
+def create_user():
+    data = request.get_json()
+    existing_user = SupaUser.query.filter_by(email=data['email']).first()
+    if existing_user:
+        return jsonify({'message': 'User already exists'}), 200
+
+    new_user = SupaUser(email=data['email'])
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify({'message': 'User created successfully!'}), 201
+
+#Get all users
+@app.route('/users', methods=['GET'])
+def get_users():
+    users = SupaUser.query.all()
+    users_list = [{'id': user.id, 'email': user.email} for user in users]
+    return jsonify(users_list)
+
+#Get user_id by email
+@app.route('/get_user_id', methods=['GET'])
+def get_user_id():
+    email = request.args.get('email')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    user = SupaUser.query.filter_by(email=email).first()
+
+    if user:
+        return jsonify({'id': user.id}), 200
+    else:
+        return jsonify({'error': 'User not found'}), 404
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
