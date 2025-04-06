@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from flask_cors import CORS
 
+
 db = SQLAlchemy()
 app = Flask(__name__)
 
@@ -75,6 +76,105 @@ def get_user_id():
     else:
         return jsonify({'error': 'User not found'}), 404
 
+####################################################################
+
+# Create new event
+@app.route('/events', methods=['POST'])
+def create_event():
+    data = request.get_json()
+    print(data) 
+    
+    organizer = SupaUser.query.get_or_404(data['organizer_id'])
+
+    start_time_str = data['start_time'].replace('Z', '')
+    end_time_str = data['end_time'].replace('Z', '')
+
+    new_event = Event(
+        title=data['title'],
+        description=data.get('description', ''),
+        start_time=datetime.fromisoformat(start_time_str),
+        end_time=datetime.fromisoformat(end_time_str),
+        organizer_id=organizer.id,
+        google_event_id=data.get('google_event_id')
+    )
+
+    attendee_emails = data.get('attendees', [])
+    for email in attendee_emails:
+        user = SupaUser.query.filter_by(email=email).first()
+        if user:
+            new_event.attendees.append(user)
+
+    db.session.add(new_event)
+    db.session.commit()
+    
+    return jsonify({'message': 'Event created successfully!', 'event_id': new_event.id}), 201
+
+# Get events by user_id
+@app.route('/events/<int:user_id>', methods=['GET'])
+def get_events(user_id):
+    events = Event.query.filter(
+        (Event.organizer_id == user_id) | (Event.attendees.any(id=user_id))
+    ).all()
+
+    events_list = [{
+        'id': event.id,
+        'title': event.title,
+        'description': event.description,
+        'start_time': event.start_time.isoformat(),
+        'end_time': event.end_time.isoformat(),
+        'organizer_id': event.organizer_id,
+        'attendees': [user.id for user in event.attendees],
+        'google_event_id' : event.google_event_id
+    } for event in events]
+    return jsonify(events_list)
+
+#Edit event / Update Event
+@app.route('/events/<int:event_id>', methods=['PUT'])
+def edit_event(event_id):
+    data = request.get_json()
+    event = Event.query.get_or_404(event_id)
+
+    organizer_id = data.get('organizer_id')
+    if not organizer_id:
+        return jsonify({'error': 'Organizer ID is required'}), 400
+
+    if event.organizer_id != organizer_id:
+        return jsonify({'error': 'Only the organizer can edit this event'}), 403
+
+    event.title = data.get('title', event.title)
+    event.description = data.get('description', event.description)
+    
+    if 'start_time' in data:
+        event.start_time = datetime.fromisoformat(data['start_time'].replace('Z', ''))
+    if 'end_time' in data:
+        event.end_time = datetime.fromisoformat(data['end_time'].replace('Z', ''))
+    if 'attendees' in data:
+        new_attendees = []
+        for email in data['attendees']:
+            user = SupaUser.query.filter_by(email=email).first()
+            if user:
+                new_attendees.append(user)
+        event.attendees = new_attendees
+
+    db.session.commit()
+    return jsonify({'message': 'Event updated successfully!'}), 200
+
+# Delete event
+@app.route('/events/<int:event_id>', methods=['DELETE'])
+def delete_event(event_id):
+    organizer_id = request.args.get('organizer_id', type=int)
+    
+    if organizer_id is None:
+        return jsonify({'error': 'Organizer ID is required as query parameter'}), 400
+
+    event = Event.query.get_or_404(event_id)
+
+    if event.organizer_id != organizer_id:
+        return jsonify({'error': 'Only the organizer can delete this event'}), 403
+
+    db.session.delete(event)
+    db.session.commit()
+    return jsonify({'message': 'Event deleted successfully!'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
